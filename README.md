@@ -136,3 +136,7 @@ docs/           screenshots
 Built-in food values are compiled from USDA FoodData Central, the Indian Food Composition
 Tables (IFCT 2017), and typical home recipes for mixed dishes. They're rounded
 approximations — add a custom food from the label when precision matters.
+
+## License
+
+[MIT](LICENSE)

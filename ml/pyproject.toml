@@ -3,6 +3,7 @@ name = "fitfreak-ml"
 version = "0.1.0"
 description = "FitFreak backend: AI meal planner now, ML models later."
 requires-python = ">=3.11"
+license = "MIT"
 dependencies = [
     "anthropic",
     "fastapi",

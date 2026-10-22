@@ -46,5 +46,6 @@
     "typecheck": "tsc --noEmit",
     "test:api": "cd ml && uv run pytest"
   },
-  "private": true
+  "private": true,
+  "license": "MIT"
 }
