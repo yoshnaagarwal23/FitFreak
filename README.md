@@ -99,6 +99,8 @@ The app works without the backend; only the AI meal planner needs it.
 ```bash
 npm test          # app logic + database tests (Node's built-in runner and SQLite)
 npm run test:api  # backend tests (pytest, fake Claude client — no key or cost)
+npm run test:db   # cloud schema: applies supabase/migrations to a throwaway local
+                  # Postgres and checks row-level security with two users
 npm run typecheck
 npx expo lint
 ```
@@ -117,7 +119,10 @@ src/
 ml/
   app/          FastAPI app; meal_plan/ (schemas, prompt, planner, nutrition)
   tests/        pytest suite
-tests/          app tests (node --test)
+supabase/
+  migrations/   cloud schema, row-level security, RPC functions, built-in reference data
+scripts/        reference-data SQL generator, local database test runner
+tests/          app tests (node --test); tests/db for the cloud schema
 docs/           screenshots
 ```
 
