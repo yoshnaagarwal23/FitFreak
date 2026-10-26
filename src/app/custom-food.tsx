@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -14,7 +14,7 @@ import { spacing } from '@/theme';
 // Add a food from a nutrition label (values per 100 g).
 export default function CustomFoodScreen() {
   const params = useLocalSearchParams<{ name?: string }>();
-  const db = useSQLiteContext();
+  const db = useDb();
   const [draft, setDraft] = useState({
     name: params.name ?? '',
     servingLabel: '1 serving',

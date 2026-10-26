@@ -1,6 +1,6 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback } from 'react';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Db } from '@/db/client';
 
 import { AppText } from '@/components/AppText';
 import { Button } from '@/components/Button';
@@ -21,7 +21,7 @@ export default function WorkoutScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const workoutId = Number(id);
 
-  const query = useCallback((db: SQLiteDatabase) => getWorkoutDetail(db, workoutId), [workoutId]);
+  const query = useCallback((db: Db) => getWorkoutDetail(db, workoutId), [workoutId]);
   const { db, data: workout, reload } = useFocusQuery(query);
   const { units } = useUnits();
 

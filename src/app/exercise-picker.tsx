@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useEffect, useState } from 'react';
 
 import { ListRow } from '@/components/ListRow';
@@ -12,7 +12,7 @@ import { addExerciseToWorkout } from '@/db/workouts';
 // Modal: pick an exercise (or create a custom one) and add it to a workout or a split day.
 export default function ExercisePickerScreen() {
   const { workoutId, splitDayId } = useLocalSearchParams<{ workoutId?: string; splitDayId?: string }>();
-  const db = useSQLiteContext();
+  const db = useDb();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Exercise[]>([]);
 

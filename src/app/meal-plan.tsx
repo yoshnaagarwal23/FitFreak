@@ -1,4 +1,4 @@
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useEffect, useState } from 'react';
 
 import { ApiError } from '@/api/client';
@@ -37,7 +37,7 @@ const YES_NO = [
 type Result = { raw: unknown; plan: MealPlan; logged: Meal[] };
 
 export default function MealPlanScreen() {
-  const db = useSQLiteContext();
+  const db = useDb();
   const { data: day } = useMacroDay();
   const [foods, setFoods] = useState<Food[]>([]);
   const [scope, setScope] = useState<PlanScope>('day');

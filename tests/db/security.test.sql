@@ -96,8 +96,12 @@ select test.eq((select count(*) from split_day_exercises where split_day_id = :u
 
 select test.fails($$ insert into foods (user_id, name, serving_label, serving_grams, calories_100g, protein_100g, carbs_100g, fat_100g, source)
                      values (auth.uid(), 'Fake USDA', '1', 1, 1, 1, 1, 1, 'usda') $$, '42501', 'users cannot add foods labelled as built-in sources');
-select test.fails($$ insert into exercises (name, muscle_group, equipment) values ('New built-in', 'legs', 'barbell') $$,
+select test.fails($$ insert into exercises (user_id, name, muscle_group, equipment) values (null, 'New built-in', 'legs', 'barbell') $$,
                   '42501', 'users cannot add built-in exercises');
+select test.fails($$ insert into foods (user_id, name, serving_label, serving_grams, calories_100g, protein_100g, carbs_100g, fat_100g, source)
+                     values (null, 'New built-in food', '1', 1, 1, 1, 1, 1, 'custom') $$, '42501', 'users cannot add built-in foods');
+insert into exercises (name, muscle_group, equipment) values ('Jefferson Curl', 'back', 'barbell');
+select test.eq((select user_id from exercises where name = 'Jefferson Curl'), auth.uid(), 'a new exercise defaults to the caller as owner');
 select test.fails($$ insert into ai_usage (user_id, kind) values (auth.uid(), 'meal_plan') $$, '42501', 'users cannot write AI usage');
 select test.fails($$ insert into workout_sets (workout_exercise_id, set_number, reps, weight_kg) values ($$ || :we || $$, 9, 0, 50) $$,
                   '23514', 'check constraints still apply (reps >= 1)');

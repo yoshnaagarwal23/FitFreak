@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useCallback, useState } from 'react';
 
 import { AppText } from '@/components/AppText';
@@ -15,7 +15,7 @@ import { formatFoodMass } from '@/lib/units';
 
 // Modal: search foods, pick one, choose a portion, log it.
 export default function FoodSearchScreen() {
-  const db = useSQLiteContext();
+  const db = useDb();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Food[]>([]);
   const [selected, setSelected] = useState<Food | null>(null);

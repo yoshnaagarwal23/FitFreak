@@ -1,8 +1,7 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
-
 import { toDateKey } from '@/lib/date';
 import { macrosForGrams, type Macros, type Meal } from '@/lib/macros';
 
+import { must, type Db } from './client';
 import type { Food } from './foods';
 
 export type FoodLog = Macros & {
@@ -13,40 +12,40 @@ export type FoodLog = Macros & {
   loggedAt: string;
 };
 
-export async function logFood(
-  db: SQLiteDatabase,
-  food: Food,
-  grams: number,
-  meal: Meal,
-  at: Date = new Date(),
-) {
+// The row for one portion, with macros copied from the food so later edits never change it.
+export function foodLogRow(food: Food, grams: number, meal: Meal, at: Date = new Date()) {
   const m = macrosForGrams(food.per100g, grams);
-  await db.runAsync(
-    `INSERT INTO food_logs (logged_on, logged_at, meal, food_id, food_name, grams,
-                            calories, protein, carbs, fat)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    toDateKey(at),
-    at.toISOString(),
+  return {
+    logged_on: toDateKey(at),
+    logged_at: at.toISOString(),
     meal,
-    food.id,
-    food.name,
+    food_id: food.id,
+    food_name: food.name,
     grams,
-    m.calories,
-    m.protein,
-    m.carbs,
-    m.fat,
-  );
+    calories: m.calories,
+    protein: m.protein,
+    carbs: m.carbs,
+    fat: m.fat,
+  };
 }
 
-export async function getFoodLogs(db: SQLiteDatabase, dateKey: string): Promise<FoodLog[]> {
-  return db.getAllAsync<FoodLog>(
-    `SELECT id, meal, food_name AS foodName, grams, logged_at AS loggedAt,
-            calories, protein, carbs, fat
-     FROM food_logs WHERE logged_on = ? ORDER BY logged_at, id`,
-    dateKey,
-  );
+export async function logFood(db: Db, food: Food, grams: number, meal: Meal, at: Date = new Date()) {
+  must(await db.from('food_logs').insert(foodLogRow(food, grams, meal, at)));
 }
 
-export async function deleteFoodLog(db: SQLiteDatabase, id: number) {
-  await db.runAsync('DELETE FROM food_logs WHERE id = ?', id);
+export async function getFoodLogs(db: Db, dateKey: string): Promise<FoodLog[]> {
+  const rows: (Macros & { id: number; meal: Meal; food_name: string; grams: number; logged_at: string })[] =
+    must(
+      await db
+        .from('food_logs')
+        .select('id, meal, food_name, grams, logged_at, calories, protein, carbs, fat')
+        .eq('logged_on', dateKey)
+        .order('logged_at')
+        .order('id'),
+    );
+  return rows.map(({ food_name, logged_at, ...r }) => ({ ...r, foodName: food_name, loggedAt: logged_at }));
+}
+
+export async function deleteFoodLog(db: Db, id: number) {
+  must(await db.from('food_logs').delete().eq('id', id));
 }

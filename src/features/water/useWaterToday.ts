@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useCallback, useState } from 'react';
 
 import {
@@ -15,7 +15,7 @@ import { DEFAULT_GOAL_GLASSES, GLASS_ML } from '@/lib/water';
 // Connects today's water data in SQLite to React state.
 // After every write we re-read from the database so the UI always reflects storage.
 export function useWaterToday() {
-  const db = useSQLiteContext();
+  const db = useDb();
   const [totalMl, setTotalMl] = useState(0);
   const [goalGlasses, setGoal] = useState(DEFAULT_GOAL_GLASSES);
   const [loaded, setLoaded] = useState(false);

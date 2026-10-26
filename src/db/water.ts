@@ -1,44 +1,44 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
-
 import { toDateKey } from '@/lib/date';
 import { clampGoal, DEFAULT_GOAL_GLASSES } from '@/lib/water';
 
-import { getSetting, setSetting } from './settings';
+import { must, type Db } from './client';
+import { getUserSettings, updateUserSettings } from './settings';
 
-const GOAL_KEY = 'water_goal_glasses';
-
-export async function getTotalMl(db: SQLiteDatabase, dateKey: string): Promise<number> {
-  const row = await db.getFirstAsync<{ total: number | null }>(
-    'SELECT SUM(amount_ml) AS total FROM water_logs WHERE logged_on = ?',
-    dateKey,
+export async function getTotalMl(db: Db, dateKey: string): Promise<number> {
+  const rows: { amount_ml: number }[] = must(
+    await db.from('water_logs').select('amount_ml').eq('logged_on', dateKey),
   );
-  return row?.total ?? 0;
+  return rows.reduce((sum, r) => sum + r.amount_ml, 0);
 }
 
-export async function addWater(db: SQLiteDatabase, amountMl: number, at: Date = new Date()) {
-  await db.runAsync(
-    'INSERT INTO water_logs (logged_on, logged_at, amount_ml) VALUES (?, ?, ?)',
-    toDateKey(at),
-    at.toISOString(),
-    amountMl,
+export async function addWater(db: Db, amountMl: number, at: Date = new Date()) {
+  must(
+    await db
+      .from('water_logs')
+      .insert({ logged_on: toDateKey(at), logged_at: at.toISOString(), amount_ml: amountMl }),
   );
 }
 
 // Removes the most recent entry for the given day (undo).
-export async function removeLatestWater(db: SQLiteDatabase, dateKey: string) {
-  await db.runAsync(
-    `DELETE FROM water_logs WHERE id = (
-       SELECT id FROM water_logs WHERE logged_on = ? ORDER BY logged_at DESC, id DESC LIMIT 1
-     )`,
-    dateKey,
+export async function removeLatestWater(db: Db, dateKey: string) {
+  const latest: { id: number }[] = must(
+    await db
+      .from('water_logs')
+      .select('id')
+      .eq('logged_on', dateKey)
+      .order('logged_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1),
   );
+  if (latest.length === 0) return;
+  must(await db.from('water_logs').delete().eq('id', latest[0].id));
 }
 
-export async function getGoalGlasses(db: SQLiteDatabase): Promise<number> {
-  const value = await getSetting(db, GOAL_KEY);
-  return value === null ? DEFAULT_GOAL_GLASSES : clampGoal(Number(value));
+export async function getGoalGlasses(db: Db): Promise<number> {
+  const settings = await getUserSettings(db);
+  return settings ? clampGoal(settings.water_goal_glasses) : DEFAULT_GOAL_GLASSES;
 }
 
-export async function setGoalGlasses(db: SQLiteDatabase, glasses: number) {
-  await setSetting(db, GOAL_KEY, String(clampGoal(glasses)));
+export async function setGoalGlasses(db: Db, glasses: number) {
+  await updateUserSettings(db, { water_goal_glasses: clampGoal(glasses) });
 }

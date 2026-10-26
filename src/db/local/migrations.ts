@@ -1,7 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { SEED_EXERCISES, SEED_EXERCISES_V3 } from './seedExercises';
-import { SEED_FOODS } from './seedFoods';
+import { SEED_EXERCISES, SEED_EXERCISES_V3 } from '../seedExercises';
+import { SEED_FOODS } from '../seedFoods';
 
 type Migration = (db: SQLiteDatabase) => Promise<void>;
 

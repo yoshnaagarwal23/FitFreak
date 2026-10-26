@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -40,7 +40,7 @@ const MODE_OPTIONS: { value: Mode; label: string }[] = [
 ];
 
 export default function MacroTargetsScreen() {
-  const db = useSQLiteContext();
+  const db = useDb();
   const [mode, setMode] = useState<Mode>('auto');
   const [sex, setSex] = useState<Sex>('female');
   const [activity, setActivity] = useState<Activity>(DEFAULT_ACTIVITY);

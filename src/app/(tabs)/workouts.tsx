@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Db } from '@/db/client';
 
 import { AppText } from '@/components/AppText';
 import { Button } from '@/components/Button';
@@ -14,7 +14,7 @@ import { formatDateKey } from '@/lib/date';
 import { useUnits } from '@/features/settings/UnitsProvider';
 import { formatMass } from '@/lib/units';
 
-const loadWorkouts = async (db: SQLiteDatabase) => {
+const loadWorkouts = async (db: Db) => {
   const [active, recent, split] = await Promise.all([
     getActiveWorkout(db),
     getRecentWorkouts(db),

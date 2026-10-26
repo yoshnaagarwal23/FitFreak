@@ -16,4 +16,9 @@ registerHooks({
       throw e;
     }
   },
+  // The app's .ts files are ES modules; saying so skips Node's CommonJS-first guess and its warning.
+  load(url, ctx, next) {
+    const isAppTs = url.startsWith(pathToFileURL(SRC).href) && url.endsWith('.ts');
+    return next(url, isAppTs ? { ...ctx, format: 'module-typescript' } : ctx);
+  },
 });

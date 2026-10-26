@@ -1,5 +1,5 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Db } from '@/db/client';
 import { useCallback, useState } from 'react';
 
 import { AppText } from '@/components/AppText';
@@ -25,7 +25,7 @@ export default function SplitDayScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const dayId = Number(id);
 
-  const query = useCallback((db: SQLiteDatabase) => getSplitDay(db, dayId), [dayId]);
+  const query = useCallback((db: Db) => getSplitDay(db, dayId), [dayId]);
   const { db, data: day, reload } = useFocusQuery(query);
 
   const [titleDraft, setTitleDraft] = useState<string | null>(null);

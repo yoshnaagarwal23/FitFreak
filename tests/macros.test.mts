@@ -1,11 +1,5 @@
 import assert from 'node:assert/strict';
-import { openTestDb } from './support/sqlite.mts';
 import * as M from '@/lib/macros';
-import { migrate, LATEST_VERSION } from '@/db/migrations';
-import { searchFoods, createFood } from '@/db/foods';
-import { logFood, getFoodLogs, deleteFoodLog } from '@/db/foodLogs';
-import { saveMacroSettings, getMacroSettings } from '@/db/macroSettings';
-import { setSetting } from '@/db/settings';
 
 // ---- Pure math ----
 const p = { sex: 'female', age: 30, heightCm: 165, weightKg: 60, activity: 'moderate', goal: 'maintain' } as const;
@@ -40,43 +34,4 @@ assert.equal(M.defaultMeal(new Date('2026-10-21T13:00:00')), 'lunch');
 assert.equal(M.defaultMeal(new Date('2026-10-21T17:00:00')), 'snack');
 assert.equal(M.defaultMeal(new Date('2026-10-21T21:00:00')), 'dinner');
 console.log('macro math, validation, portions: OK');
-
-// ---- Database ----
-const { raw, db } = openTestDb();
-await migrate(db, 3);
-raw.exec("INSERT INTO water_logs (logged_on, logged_at, amount_ml) VALUES ('2026-10-21','x',250)");
-await migrate(db);
-assert.equal((raw.prepare('PRAGMA user_version').get() as any).user_version, LATEST_VERSION);
-assert.equal((raw.prepare('SELECT COUNT(*) n FROM water_logs').get() as any).n, 1);
-console.log('v3 → v4 upgrade keeps data; foods seeded:', (raw.prepare('SELECT COUNT(*) n FROM foods').get() as any).n);
-
-const dal = await searchFoods(db, 'dal');
-console.log('search "dal":', dal.map(f => f.name));
-assert.ok((await searchFoods(db, 'Ro'))[0].name.startsWith('Ro'), 'prefix matches first');
-assert.deepEqual(await searchFoods(db, '%'), [], 'LIKE wildcards escaped');
-
-const roti = (await searchFoods(db, 'roti'))[0];
-await logFood(db, roti, 80, 'lunch', new Date('2026-10-21T13:00:00'));
-await logFood(db, roti, 40, 'dinner', new Date('2026-10-20T21:00:00')); // different day
-let logs = await getFoodLogs(db, '2026-10-21');
-assert.equal(logs.length, 1); assert.ok(Math.abs(logs[0].calories - 237.6) < 1e-6); assert.equal(logs[0].meal, 'lunch');
-// Snapshot: editing the food does not rewrite the log
-raw.exec("UPDATE foods SET calories_100g = 999 WHERE name = 'Roti / chapati'");
-assert.ok(Math.abs((await getFoodLogs(db, '2026-10-21'))[0].calories - 237.6) < 1e-6);
-await deleteFoodLog(db, logs[0].id);
-assert.equal((await getFoodLogs(db, '2026-10-21')).length, 0);
-console.log('log / day filter / snapshot / delete: OK');
-
-assert.ok(cf.ok);
-assert.ok(await createFood(db, cf.value));
-assert.equal(await createFood(db, { ...cf.value, name: 'TEST CURD' }), null, 'case-insensitive duplicate');
-assert.equal((await searchFoods(db, 'test curd'))[0].source, 'custom');
-console.log('custom food create + duplicate guard: OK');
-
-assert.equal(await getMacroSettings(db), null);
-await saveMacroSettings(db, { mode: 'auto', profile: p as any, manual: null });
-assert.deepEqual(M.resolveTargets(await getMacroSettings(db)), r.targets);
-await setSetting(db, 'macro_settings', '{broken');
-assert.equal(await getMacroSettings(db), null, 'corrupt JSON → null, no crash');
-console.log('settings round-trip + corrupt JSON guard: OK');
 console.log('ALL MACRO CHECKS PASSED');

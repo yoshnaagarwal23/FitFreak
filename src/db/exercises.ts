@@ -1,6 +1,6 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
-
 import type { Equipment, MuscleGroup, SessionRow } from '@/lib/workout';
+
+import { escapeLike, must, type Db } from './client';
 
 export type Exercise = {
   id: number;
@@ -12,46 +12,62 @@ export type Exercise = {
 
 type ExerciseRow = {
   id: number;
+  user_id: string | null;
   name: string;
   muscle_group: MuscleGroup;
   equipment: Equipment;
-  is_custom: number;
 };
 
+// Built-in exercises have no owner; custom ones belong to the user who added them.
 const toExercise = (r: ExerciseRow): Exercise => ({
   id: r.id,
   name: r.name,
   muscleGroup: r.muscle_group,
   equipment: r.equipment,
-  isCustom: r.is_custom === 1,
+  isCustom: r.user_id !== null,
 });
 
-export async function searchExercises(db: SQLiteDatabase, query: string): Promise<Exercise[]> {
-  const rows = await db.getAllAsync<ExerciseRow>(
-    `SELECT * FROM exercises WHERE name LIKE ? ESCAPE '\\' ORDER BY muscle_group, name`,
-    `%${query.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+const EXERCISE_COLUMNS = 'id, user_id, name, muscle_group, equipment';
+
+export async function searchExercises(db: Db, query: string): Promise<Exercise[]> {
+  const rows: ExerciseRow[] = must(
+    await db
+      .from('exercises')
+      .select(EXERCISE_COLUMNS)
+      .ilike('name', `%${escapeLike(query.trim())}%`)
+      .order('muscle_group')
+      .order('name'),
   );
   return rows.map(toExercise);
 }
 
-export async function getExercise(db: SQLiteDatabase, id: number): Promise<Exercise | null> {
-  const row = await db.getFirstAsync<ExerciseRow>('SELECT * FROM exercises WHERE id = ?', id);
+export async function getExercise(db: Db, id: number): Promise<Exercise | null> {
+  const row: ExerciseRow | null = must(
+    await db.from('exercises').select(EXERCISE_COLUMNS).eq('id', id).maybeSingle(),
+  );
   return row ? toExercise(row) : null;
 }
 
 // Returns the existing exercise's id if the name is already taken (case-insensitive).
-export async function createExercise(db: SQLiteDatabase, name: string): Promise<number> {
+export async function createExercise(db: Db, name: string): Promise<number> {
   const trimmed = name.trim();
-  const existing = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM exercises WHERE name = ?',
-    trimmed,
+  const existing: { id: number }[] = must(
+    await db
+      .from('exercises')
+      .select('id')
+      .ilike('name', escapeLike(trimmed))
+      .order('user_id', { nullsFirst: true })
+      .limit(1),
   );
-  if (existing) return existing.id;
-  const result = await db.runAsync(
-    `INSERT INTO exercises (name, muscle_group, equipment, is_custom) VALUES (?, 'other', 'other', 1)`,
-    trimmed,
+  if (existing.length > 0) return existing[0].id;
+  const row: { id: number } = must(
+    await db
+      .from('exercises')
+      .insert({ name: trimmed, muscle_group: 'other', equipment: 'other' })
+      .select('id')
+      .single(),
   );
-  return result.lastInsertRowId;
+  return row.id;
 }
 
 export type LoggedExercise = {
@@ -63,30 +79,43 @@ export type LoggedExercise = {
 };
 
 // Exercises with at least one logged set, most recently trained first.
-export async function getLoggedExercises(db: SQLiteDatabase): Promise<LoggedExercise[]> {
-  return db.getAllAsync<LoggedExercise>(`
-    SELECT e.id, e.name,
-           COUNT(DISTINCT w.id) AS sessionCount,
-           MAX(w.performed_on) AS lastPerformedOn,
-           MAX(s.weight_kg) AS topWeightKg
-    FROM exercises e
-    JOIN workout_exercises we ON we.exercise_id = e.id
-    JOIN workouts w ON w.id = we.workout_id
-    JOIN workout_sets s ON s.workout_exercise_id = we.id
-    GROUP BY e.id
-    ORDER BY lastPerformedOn DESC, e.name
-  `);
+export async function getLoggedExercises(db: Db): Promise<LoggedExercise[]> {
+  const rows: {
+    id: number;
+    name: string;
+    session_count: number;
+    last_performed_on: string;
+    top_weight_kg: number;
+  }[] = must(
+    await db
+      .from('logged_exercises')
+      .select('*')
+      .order('last_performed_on', { ascending: false })
+      .order('name'),
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    sessionCount: r.session_count,
+    lastPerformedOn: r.last_performed_on,
+    topWeightKg: r.top_weight_kg,
+  }));
 }
 
 // Every set ever logged for an exercise, oldest first.
-export async function getExerciseHistory(db: SQLiteDatabase, exerciseId: number): Promise<SessionRow[]> {
-  return db.getAllAsync<SessionRow>(
-    `SELECT w.id AS workoutId, w.performed_on AS performedOn, s.weight_kg AS weightKg, s.reps
-     FROM workout_sets s
-     JOIN workout_exercises we ON we.id = s.workout_exercise_id
-     JOIN workouts w ON w.id = we.workout_id
-     WHERE we.exercise_id = ?
-     ORDER BY w.started_at, s.set_number`,
-    exerciseId,
+export async function getExerciseHistory(db: Db, exerciseId: number): Promise<SessionRow[]> {
+  const rows: { workout_id: number; performed_on: string; weight_kg: number; reps: number }[] = must(
+    await db
+      .from('exercise_sets')
+      .select('workout_id, performed_on, weight_kg, reps')
+      .eq('exercise_id', exerciseId)
+      .order('started_at')
+      .order('set_number'),
   );
+  return rows.map((r) => ({
+    workoutId: r.workout_id,
+    performedOn: r.performed_on,
+    weightKg: r.weight_kg,
+    reps: r.reps,
+  }));
 }

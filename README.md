@@ -28,6 +28,8 @@ ships to iOS later, plus a Python FastAPI service for AI and ML.
   the server computes and checks every number before the app shows it.
 - **Water tracker** — one-tap glass logging toward a daily goal.
 - **Metric or imperial** — kg/cm or lb/ft-in everywhere you type or read a measurement.
+- **Accounts** — email sign-up and log-in; your data follows you to any browser. Data
+  logged before accounts existed can be imported once from Settings.
 
 ## Architecture
 
@@ -36,9 +38,14 @@ flowchart LR
   subgraph App["Expo app (web now, iOS later)"]
     UI["Screens<br/>src/app, src/features"] --> Logic["Pure logic<br/>src/lib"]
     UI --> Repo["Data access<br/>src/db"]
-    Repo --> SQLite[("SQLite<br/>expo-sqlite")]
     UI --> Client["API client<br/>src/api"]
   end
+  subgraph Supabase
+    Auth["Auth<br/>email + password"]
+    PG[("Postgres<br/>row-level security")]
+  end
+  Repo -- "supabase-js (user's JWT)" --> PG
+  UI -- "sign in / sign up" --> Auth
   subgraph API["FastAPI service (/ml)"]
     Route["POST /meal-plan"] --> Planner["planner.py<br/>retry + pick best"]
     Planner --> Nutrition["nutrition.py<br/>macro math + rule checks"]
@@ -55,7 +62,8 @@ The code is organised in layers, and each layer only talks to the one beneath it
 | Feature components | `src/features/<feature>/` | UI for one feature, plus its hooks |
 | Shared components | `src/components/` | Generic UI; all styling from `src/theme.ts` |
 | Pure logic | `src/lib/` | No storage, no UI, no network — unit-testable math and validation |
-| Data access | `src/db/` | All SQL lives here; schema changes go through numbered migrations |
+| Data access | `src/db/` | Every query lives here; functions take the Supabase client so tests can swap in a local one |
+| Database | `supabase/migrations/` | Schema, row-level security, and multi-step operations as SQL functions; append-only |
 | Backend | `ml/app/` | FastAPI; holds the Anthropic key; never trusted blindly by the app |
 
 ### Design decisions
@@ -73,19 +81,32 @@ The code is organised in layers, and each layer only talks to the one beneath it
   boundary means switching units never rewrites history.
 - **History is immutable.** Food logs copy their macros at log time; workouts copy their
   split targets when started. Editing a food or a split never changes past days.
-- **Migrations, not resets.** The schema evolves through append-only migrations tracked by
-  SQLite's `user_version`, each tested against an older database with real data in it.
+- **Security lives in the database.** The app ships a public key, so the database itself
+  enforces who sees what: every table has row-level security, child rows (sets, split days)
+  also check that their parent belongs to the caller, and built-in foods can't be forged.
+  `npm run test:db` attacks it with a second account and a logged-out visitor.
+- **Multi-step writes are SQL functions.** Starting a workout from a split day, saving a
+  split, or deleting and renumbering a set each run as one transaction on the server
+  instead of several requests that could half-finish.
+- **Migrations, not resets.** Both the cloud schema and the old local SQLite schema evolve
+  through append-only migrations, tested against databases with real data in them.
 - **Model training data from day one.** Every set, glass, and food entry is stored as an
   individual timestamped event, and workouts record their targets — the raw material for
   the progressive-overload model.
 
 ## Getting started
 
-Requirements: Node 20+, [uv](https://docs.astral.sh/uv/) (Python), an Anthropic API key
-for the meal planner.
+Requirements: Node 20+, a free [Supabase](https://supabase.com) project,
+[uv](https://docs.astral.sh/uv/) (Python) and an Anthropic API key for the meal planner.
+
+1. In Supabase, open **SQL Editor** and run the files in `supabase/migrations/` in order.
+2. Under **Authentication → URL Configuration**, set the Site URL to where the app runs
+   (`http://localhost:8081` for development) so confirmation and reset emails link back.
+3. Then:
 
 ```bash
 npm install
+cp .env.example .env.local      # Project URL + publishable key (Project Settings → API)
 npx expo start --web            # app at http://localhost:8081
 
 cp ml/.env.example ml/.env      # add your ANTHROPIC_API_KEY
@@ -99,8 +120,9 @@ The app works without the backend; only the AI meal planner needs it.
 ```bash
 npm test          # app logic + database tests (Node's built-in runner and SQLite)
 npm run test:api  # backend tests (pytest, fake Claude client — no key or cost)
-npm run test:db   # cloud schema: applies supabase/migrations to a throwaway local
-                  # Postgres and checks row-level security with two users
+npm run test:db   # applies supabase/migrations to a throwaway local Postgres, checks
+                  # row-level security with two users, then runs the real src/db code
+                  # against it through PostgREST (needs: brew install postgresql postgrest)
 npm run typecheck
 npx expo lint
 ```
@@ -112,8 +134,9 @@ src/
   app/          routes (tabs: Today, Workouts, Meals, Progress; plus pushed screens)
   features/     water, workouts, split, macros, mealPlan, settings
   components/   shared UI (Screen, Card, Button, OptionGroup, LineChart, ProgressRing…)
-  lib/          pure logic: macros, split rules, workout math, units, meal-plan validation
-  db/           SQLite migrations and queries; seed exercises and foods
+  lib/          pure logic: macros, split rules, workout math, units, meal-plan validation, auth
+  db/           queries against Supabase; seed exercises and foods; local/ reads the
+                pre-account SQLite database for the one-time import
   api/          HTTP client for the backend
   theme.ts      colors, spacing, type scale — the only place styles are defined
 ml/
@@ -122,14 +145,14 @@ ml/
 supabase/
   migrations/   cloud schema, row-level security, RPC functions, built-in reference data
 scripts/        reference-data SQL generator, local database test runner
-tests/          app tests (node --test); tests/db for the cloud schema
+tests/          app tests (node --test); tests/db (SQL) and tests/cloud (data layer) for the database
 docs/           screenshots
 ```
 
 ## Roadmap
 
 - [x] Phases 1–6 — scaffold, water, workouts, split generator, macros, AI meal planner
-- [ ] Accounts and cloud data (Supabase auth + Postgres with row-level security)
+- [x] Accounts and cloud data (Supabase auth + Postgres with row-level security)
 - [ ] Hosted website for friends; AI planner limited per user per day
 - [ ] Front-end overhaul — desktop layout, dashboard with weekly charts, onboarding, dark mode
 - [ ] ML: synthetic training data → progressive-overload predictor (linear baseline vs

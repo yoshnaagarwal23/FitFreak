@@ -1,22 +1,13 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
-
 import type { MacroSettings } from '@/lib/macros';
 
-import { getSetting, setSetting } from './settings';
+import type { Db } from './client';
+import { getUserSettings, updateUserSettings } from './settings';
 
-const KEY = 'macro_settings';
-
-export async function getMacroSettings(db: SQLiteDatabase): Promise<MacroSettings | null> {
-  const raw = await getSetting(db, KEY);
-  if (raw === null) return null;
-  try {
-    const parsed = JSON.parse(raw) as MacroSettings;
-    return parsed.mode === 'auto' || parsed.mode === 'manual' ? parsed : null;
-  } catch {
-    return null;
-  }
+export async function getMacroSettings(db: Db): Promise<MacroSettings | null> {
+  const parsed = (await getUserSettings(db))?.macro_settings;
+  return parsed?.mode === 'auto' || parsed?.mode === 'manual' ? parsed : null;
 }
 
-export async function saveMacroSettings(db: SQLiteDatabase, settings: MacroSettings) {
-  await setSetting(db, KEY, JSON.stringify(settings));
+export async function saveMacroSettings(db: Db, settings: MacroSettings) {
+  await updateUserSettings(db, { macro_settings: settings });
 }

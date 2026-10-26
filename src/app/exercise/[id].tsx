@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import type { Db } from '@/db/client';
 import { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -20,7 +20,7 @@ export default function ExerciseHistoryScreen() {
   const exerciseId = Number(id);
 
   const query = useCallback(
-    async (db: SQLiteDatabase) => {
+    async (db: Db) => {
       const [exercise, rows] = await Promise.all([
         getExercise(db, exerciseId),
         getExerciseHistory(db, exerciseId),

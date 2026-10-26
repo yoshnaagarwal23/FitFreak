@@ -1,6 +1,6 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
-
 import type { CustomFoodInput, Macros } from '@/lib/macros';
+
+import { escapeLike, must, type Db } from './client';
 
 export type Food = {
   id: number;
@@ -21,9 +21,12 @@ type FoodRow = {
   protein_100g: number;
   carbs_100g: number;
   fat_100g: number;
-  is_vegetarian: number;
+  is_vegetarian: boolean;
   source: string;
 };
+
+const FOOD_COLUMNS =
+  'id, name, serving_label, serving_grams, calories_100g, protein_100g, carbs_100g, fat_100g, is_vegetarian, source';
 
 const toFood = (r: FoodRow): Food => ({
   id: r.id,
@@ -36,49 +39,57 @@ const toFood = (r: FoodRow): Food => ({
     carbs: r.carbs_100g,
     fat: r.fat_100g,
   },
-  vegetarian: r.is_vegetarian === 1,
+  vegetarian: r.is_vegetarian,
   source: r.source,
 });
 
 // Name search; names that start with the query rank first.
-export async function searchFoods(db: SQLiteDatabase, query: string, limit = 50): Promise<Food[]> {
-  const q = query.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
-  const rows = await db.getAllAsync<FoodRow>(
-    `SELECT * FROM foods WHERE name LIKE ? ESCAPE '\\'
-     ORDER BY CASE WHEN name LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, name
-     LIMIT ?`,
-    `%${q}%`,
-    `${q}%`,
-    limit,
+export async function searchFoods(db: Db, query: string, limit = 50): Promise<Food[]> {
+  const q = query.trim();
+  const rows: FoodRow[] = must(
+    await db.from('foods').select(FOOD_COLUMNS).ilike('name', `%${escapeLike(q)}%`).order('name'),
   );
-  return rows.map(toFood);
+  const starts = (f: FoodRow) => f.name.toLowerCase().startsWith(q.toLowerCase());
+  return [...rows.filter(starts), ...rows.filter((f) => !starts(f))].slice(0, limit).map(toFood);
 }
 
-export async function getFood(db: SQLiteDatabase, id: number): Promise<Food | null> {
-  const row = await db.getFirstAsync<FoodRow>('SELECT * FROM foods WHERE id = ?', id);
+export async function getFood(db: Db, id: number): Promise<Food | null> {
+  const row: FoodRow | null = must(await db.from('foods').select(FOOD_COLUMNS).eq('id', id).maybeSingle());
   return row ? toFood(row) : null;
 }
 
-// Returns null if a food with that name already exists.
-export async function createFood(db: SQLiteDatabase, food: CustomFoodInput): Promise<number | null> {
-  const existing = await db.getFirstAsync<{ id: number }>('SELECT id FROM foods WHERE name = ?', food.name);
-  if (existing) return null;
-  const result = await db.runAsync(
-    `INSERT INTO foods (name, serving_label, serving_grams, calories_100g, protein_100g,
-                        carbs_100g, fat_100g, is_vegetarian, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'custom')`,
-    food.name,
-    food.servingLabel,
-    food.servingGrams,
-    food.per100g.calories,
-    food.per100g.protein,
-    food.per100g.carbs,
-    food.per100g.fat,
-  );
-  return result.lastInsertRowId;
+export async function getFoodsById(db: Db, ids: number[]): Promise<Map<number, Food>> {
+  const rows: FoodRow[] = must(await db.from('foods').select(FOOD_COLUMNS).in('id', ids));
+  return new Map(rows.map((r) => [r.id, toFood(r)]));
 }
 
-export async function getAllFoods(db: SQLiteDatabase): Promise<Food[]> {
-  const rows = await db.getAllAsync<FoodRow>('SELECT * FROM foods ORDER BY name');
+// Returns null if a food with that name already exists (built-in or the user's own).
+export async function createFood(db: Db, food: CustomFoodInput): Promise<number | null> {
+  const existing: { id: number }[] = must(
+    await db.from('foods').select('id').ilike('name', escapeLike(food.name.trim())).limit(1),
+  );
+  if (existing.length > 0) return null;
+  const row: { id: number } = must(
+    await db
+      .from('foods')
+      .insert({
+        name: food.name.trim(),
+        serving_label: food.servingLabel,
+        serving_grams: food.servingGrams,
+        calories_100g: food.per100g.calories,
+        protein_100g: food.per100g.protein,
+        carbs_100g: food.per100g.carbs,
+        fat_100g: food.per100g.fat,
+        is_vegetarian: true,
+        source: 'custom',
+      })
+      .select('id')
+      .single(),
+  );
+  return row.id;
+}
+
+export async function getAllFoods(db: Db): Promise<Food[]> {
+  const rows: FoodRow[] = must(await db.from('foods').select(FOOD_COLUMNS).order('name'));
   return rows.map(toFood);
 }

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { useDb } from '@/db/supabase';
 import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/Button';
@@ -26,7 +26,7 @@ const DAY_OPTIONS = Array.from({ length: MAX_DAYS - MIN_DAYS + 1 }, (_, i) => ({
 
 // Split builder: pick inputs, preview the generated plan live, save it.
 export default function SplitScreen() {
-  const db = useSQLiteContext();
+  const db = useDb();
   const [inputs, setInputs] = useState<SplitInputs>(DEFAULT_INPUTS);
   const [saving, setSaving] = useState(false);
 

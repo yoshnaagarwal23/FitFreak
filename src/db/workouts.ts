@@ -1,7 +1,7 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
-
 import { toDateKey } from '@/lib/date';
 import type { SetEntry } from '@/lib/workout';
+
+import { must, type Db } from './client';
 
 export type Workout = {
   id: number;
@@ -10,71 +10,40 @@ export type Workout = {
   finishedAt: string | null;
 };
 
-const WORKOUT_COLUMNS =
-  'id, performed_on AS performedOn, started_at AS startedAt, finished_at AS finishedAt';
+type WorkoutRow = { id: number; performed_on: string; started_at: string; finished_at: string | null };
 
-export async function getActiveWorkout(db: SQLiteDatabase): Promise<Workout | null> {
-  return db.getFirstAsync<Workout>(
-    `SELECT ${WORKOUT_COLUMNS} FROM workouts WHERE finished_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+const WORKOUT_COLUMNS = 'id, performed_on, started_at, finished_at';
+
+const toWorkout = (r: WorkoutRow): Workout => ({
+  id: r.id,
+  performedOn: r.performed_on,
+  startedAt: r.started_at,
+  finishedAt: r.finished_at,
+});
+
+export async function getActiveWorkout(db: Db): Promise<Workout | null> {
+  const row: WorkoutRow | null = must(
+    await db.from('workouts').select(WORKOUT_COLUMNS).is('finished_at', null).maybeSingle(),
   );
+  return row ? toWorkout(row) : null;
 }
 
 // Only one workout can be in progress; returns it instead of starting another.
-export async function startWorkout(db: SQLiteDatabase, at: Date = new Date()): Promise<number> {
-  const active = await getActiveWorkout(db);
-  if (active) return active.id;
-  const result = await db.runAsync(
-    'INSERT INTO workouts (performed_on, started_at) VALUES (?, ?)',
-    toDateKey(at),
-    at.toISOString(),
-  );
-  return result.lastInsertRowId;
+export async function startWorkout(db: Db, at: Date = new Date()): Promise<number> {
+  return must(await db.rpc('start_workout', { p_local_date: toDateKey(at) }));
 }
 
 // Starts a workout pre-filled with a split day's exercises and their targets.
 // If a workout is already in progress, returns that one instead.
-export async function startWorkoutFromSplitDay(
-  db: SQLiteDatabase,
-  splitDayId: number,
-  at: Date = new Date(),
-): Promise<number> {
-  const active = await getActiveWorkout(db);
-  if (active) return active.id;
-
-  let workoutId = 0;
-  await db.withTransactionAsync(async () => {
-    const result = await db.runAsync(
-      'INSERT INTO workouts (performed_on, started_at, split_day_id) VALUES (?, ?, ?)',
-      toDateKey(at),
-      at.toISOString(),
-      splitDayId,
-    );
-    workoutId = result.lastInsertRowId;
-    await db.runAsync(
-      `INSERT INTO workout_exercises
-         (workout_id, exercise_id, position, target_sets, target_reps_min, target_reps_max)
-       SELECT ?, exercise_id, position + 1, sets, reps_min, reps_max
-       FROM split_day_exercises WHERE split_day_id = ? ORDER BY position`,
-      workoutId,
-      splitDayId,
-    );
-  });
-  return workoutId;
+export async function startWorkoutFromSplitDay(db: Db, splitDayId: number, at: Date = new Date()): Promise<number> {
+  return must(
+    await db.rpc('start_workout_from_split_day', { p_split_day_id: splitDayId, p_local_date: toDateKey(at) }),
+  );
 }
 
 // Finishing a workout with no sets discards it.
-export async function finishWorkout(db: SQLiteDatabase, workoutId: number, at: Date = new Date()) {
-  const row = await db.getFirstAsync<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM workout_sets s
-     JOIN workout_exercises we ON we.id = s.workout_exercise_id
-     WHERE we.workout_id = ?`,
-    workoutId,
-  );
-  if ((row?.n ?? 0) === 0) {
-    await db.runAsync('DELETE FROM workouts WHERE id = ?', workoutId);
-  } else {
-    await db.runAsync('UPDATE workouts SET finished_at = ? WHERE id = ?', at.toISOString(), workoutId);
-  }
+export async function finishWorkout(db: Db, workoutId: number) {
+  must(await db.rpc('finish_workout', { p_workout_id: workoutId }));
 }
 
 export type LoggedSet = SetEntry & { id: number; setNumber: number };
@@ -92,119 +61,74 @@ export type Target = { sets: number; repsMin: number; repsMax: number };
 
 export type WorkoutDetail = Workout & { splitDayTitle: string | null; exercises: WorkoutExercise[] };
 
-export async function getWorkoutDetail(
-  db: SQLiteDatabase,
-  workoutId: number,
-): Promise<WorkoutDetail | null> {
-  const workout = await db.getFirstAsync<Workout & { splitDayTitle: string | null }>(
-    `SELECT w.id, w.performed_on AS performedOn, w.started_at AS startedAt,
-            w.finished_at AS finishedAt, d.title AS splitDayTitle
-     FROM workouts w LEFT JOIN split_days d ON d.id = w.split_day_id
-     WHERE w.id = ?`,
-    workoutId,
-  );
-  if (!workout) return null;
-
-  const exercises = await db.getAllAsync<{
+type DetailRow = WorkoutRow & {
+  split_days: { title: string } | null;
+  workout_exercises: {
     id: number;
-    exerciseId: number;
-    name: string;
-    targetSets: number | null;
-    targetRepsMin: number | null;
-    targetRepsMax: number | null;
-  }>(
-    `SELECT we.id, we.exercise_id AS exerciseId, e.name, we.target_sets AS targetSets,
-            we.target_reps_min AS targetRepsMin, we.target_reps_max AS targetRepsMax
-     FROM workout_exercises we JOIN exercises e ON e.id = we.exercise_id
-     WHERE we.workout_id = ? ORDER BY we.position`,
-    workoutId,
-  );
-  const sets = await db.getAllAsync<LoggedSet & { workoutExerciseId: number }>(
-    `SELECT s.id, s.workout_exercise_id AS workoutExerciseId, s.set_number AS setNumber,
-            s.reps, s.weight_kg AS weightKg
-     FROM workout_sets s JOIN workout_exercises we ON we.id = s.workout_exercise_id
-     WHERE we.workout_id = ? ORDER BY s.set_number`,
-    workoutId,
-  );
+    exercise_id: number;
+    position: number;
+    target_sets: number | null;
+    target_reps_min: number | null;
+    target_reps_max: number | null;
+    exercises: { name: string };
+    workout_sets: { id: number; set_number: number; reps: number; weight_kg: number }[];
+  }[];
+};
 
-  const result: WorkoutExercise[] = [];
-  for (const { targetSets, targetRepsMin, targetRepsMax, ...ex } of exercises) {
-    result.push({
-      ...ex,
+export async function getWorkoutDetail(db: Db, workoutId: number): Promise<WorkoutDetail | null> {
+  const w: DetailRow | null = must(
+    await db
+      .from('workouts')
+      .select(
+        `${WORKOUT_COLUMNS}, split_days (title),
+         workout_exercises (id, exercise_id, position, target_sets, target_reps_min, target_reps_max,
+           exercises (name), workout_sets (id, set_number, reps, weight_kg))`,
+      )
+      .eq('id', workoutId)
+      .maybeSingle(),
+  );
+  if (!w) return null;
+
+  const exerciseIds = w.workout_exercises.map((we) => we.exercise_id);
+  const lastSets: { exercise_id: number; weight_kg: number; reps: number }[] =
+    exerciseIds.length === 0
+      ? []
+      : must(await db.from('last_sets').select('exercise_id, weight_kg, reps').in('exercise_id', exerciseIds));
+  const lastByExercise = new Map(lastSets.map((s) => [s.exercise_id, { weightKg: s.weight_kg, reps: s.reps }]));
+
+  const exercises = [...w.workout_exercises]
+    .sort((a, b) => a.position - b.position)
+    .map((we) => ({
+      id: we.id,
+      exerciseId: we.exercise_id,
+      name: we.exercises.name,
       target:
-        targetSets !== null && targetRepsMin !== null && targetRepsMax !== null
-          ? { sets: targetSets, repsMin: targetRepsMin, repsMax: targetRepsMax }
+        we.target_sets !== null && we.target_reps_min !== null && we.target_reps_max !== null
+          ? { sets: we.target_sets, repsMin: we.target_reps_min, repsMax: we.target_reps_max }
           : null,
-      sets: sets
-        .filter((s) => s.workoutExerciseId === ex.id)
-        .map(({ id, setNumber, reps, weightKg }) => ({ id, setNumber, reps, weightKg })),
-      lastSet: await getLastSet(db, ex.exerciseId),
-    });
-  }
-  return { ...workout, exercises: result };
+      sets: [...we.workout_sets]
+        .sort((a, b) => a.set_number - b.set_number)
+        .map((s) => ({ id: s.id, setNumber: s.set_number, reps: s.reps, weightKg: s.weight_kg })),
+      lastSet: lastByExercise.get(we.exercise_id) ?? null,
+    }));
+  return { ...toWorkout(w), splitDayTitle: w.split_days?.title ?? null, exercises };
 }
 
-async function getLastSet(db: SQLiteDatabase, exerciseId: number): Promise<SetEntry | null> {
-  return db.getFirstAsync<SetEntry>(
-    `SELECT s.weight_kg AS weightKg, s.reps
-     FROM workout_sets s JOIN workout_exercises we ON we.id = s.workout_exercise_id
-     WHERE we.exercise_id = ? ORDER BY s.logged_at DESC, s.id DESC LIMIT 1`,
-    exerciseId,
-  );
+export async function addExerciseToWorkout(db: Db, workoutId: number, exerciseId: number) {
+  must(await db.rpc('add_exercise_to_workout', { p_workout_id: workoutId, p_exercise_id: exerciseId }));
 }
 
-export async function addExerciseToWorkout(
-  db: SQLiteDatabase,
-  workoutId: number,
-  exerciseId: number,
-) {
-  await db.runAsync(
-    `INSERT OR IGNORE INTO workout_exercises (workout_id, exercise_id, position)
-     VALUES (?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM workout_exercises WHERE workout_id = ?))`,
-    workoutId,
-    exerciseId,
-    workoutId,
-  );
+export async function removeExerciseFromWorkout(db: Db, workoutExerciseId: number) {
+  must(await db.from('workout_exercises').delete().eq('id', workoutExerciseId));
 }
 
-export async function removeExerciseFromWorkout(db: SQLiteDatabase, workoutExerciseId: number) {
-  await db.runAsync('DELETE FROM workout_exercises WHERE id = ?', workoutExerciseId);
-}
-
-export async function addSet(
-  db: SQLiteDatabase,
-  workoutExerciseId: number,
-  { weightKg, reps }: SetEntry,
-  at: Date = new Date(),
-) {
-  await db.runAsync(
-    `INSERT INTO workout_sets (workout_exercise_id, set_number, reps, weight_kg, logged_at)
-     VALUES (?, (SELECT COUNT(*) + 1 FROM workout_sets WHERE workout_exercise_id = ?), ?, ?, ?)`,
-    workoutExerciseId,
-    workoutExerciseId,
-    reps,
-    weightKg,
-    at.toISOString(),
-  );
+export async function addSet(db: Db, workoutExerciseId: number, { weightKg, reps }: SetEntry) {
+  must(await db.rpc('add_set', { p_workout_exercise_id: workoutExerciseId, p_reps: reps, p_weight_kg: weightKg }));
 }
 
 // Deletes a set and renumbers the remaining sets of that exercise 1..n.
-export async function deleteSet(db: SQLiteDatabase, setId: number) {
-  const row = await db.getFirstAsync<{ weId: number }>(
-    'SELECT workout_exercise_id AS weId FROM workout_sets WHERE id = ?',
-    setId,
-  );
-  if (!row) return;
-  await db.withTransactionAsync(async () => {
-    await db.runAsync('DELETE FROM workout_sets WHERE id = ?', setId);
-    await db.runAsync(
-      `UPDATE workout_sets SET set_number = (
-         SELECT COUNT(*) FROM workout_sets s2
-         WHERE s2.workout_exercise_id = workout_sets.workout_exercise_id AND s2.id <= workout_sets.id
-       ) WHERE workout_exercise_id = ?`,
-      row.weId,
-    );
-  });
+export async function deleteSet(db: Db, setId: number) {
+  must(await db.rpc('delete_set', { p_set_id: setId }));
 }
 
 export type WorkoutSummary = Workout & {
@@ -213,19 +137,14 @@ export type WorkoutSummary = Workout & {
   volumeKg: number;
 };
 
-export async function getRecentWorkouts(db: SQLiteDatabase, limit = 20): Promise<WorkoutSummary[]> {
-  return db.getAllAsync<WorkoutSummary>(
-    `SELECT w.id, w.performed_on AS performedOn, w.started_at AS startedAt, w.finished_at AS finishedAt,
-            COUNT(DISTINCT s.workout_exercise_id) AS exerciseCount,
-            COUNT(s.id) AS setCount,
-            COALESCE(SUM(s.weight_kg * s.reps), 0) AS volumeKg
-     FROM workouts w
-     LEFT JOIN workout_exercises we ON we.workout_id = w.id
-     LEFT JOIN workout_sets s ON s.workout_exercise_id = we.id
-     WHERE w.finished_at IS NOT NULL
-     GROUP BY w.id
-     ORDER BY w.started_at DESC
-     LIMIT ?`,
-    limit,
+export async function getRecentWorkouts(db: Db, limit = 20): Promise<WorkoutSummary[]> {
+  const rows: (WorkoutRow & { exercise_count: number; set_count: number; volume_kg: number })[] = must(
+    await db.from('workout_summaries').select('*').order('started_at', { ascending: false }).limit(limit),
   );
+  return rows.map((r) => ({
+    ...toWorkout(r),
+    exerciseCount: r.exercise_count,
+    setCount: r.set_count,
+    volumeKg: r.volume_kg,
+  }));
 }
