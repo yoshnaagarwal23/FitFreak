@@ -33,6 +33,8 @@ ships to iOS later, plus a Python FastAPI service for AI and ML.
 
 ## Architecture
 
+A high-level view is below. The full set of diagrams is in **[docs/architecture.md](docs/architecture.md)**: sign-in flow, a request traced end to end, the data model, the import, and testing.
+
 ```mermaid
 flowchart LR
   subgraph App["Expo app (web now, iOS later)"]
